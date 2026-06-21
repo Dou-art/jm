@@ -1119,7 +1119,7 @@ struct Index {
         .clip(true)
 
         Column({ space: 6 }) {
-          Text('GitHub')
+          Text('开源地址')
             .fontSize(15)
             .fontWeight(FontWeight.Medium)
             .fontColor(COLOR_TEXT)
@@ -1130,7 +1130,7 @@ struct Index {
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .width('100%')
-          Text('Built entirely by AI')
+          Text('全程由AI完成')
             .fontSize(12)
             .fontColor(COLOR_MUTED)
             .width('100%')
