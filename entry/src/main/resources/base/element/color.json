@@ -2,11 +2,11 @@
   "color": [
     {
       "name": "start_window_background",
-      "value": "#FFFFFF"
+      "value": "#F7F7F8"
     },
     {
       "name": "jm_bg",
-      "value": "#F3F4F6"
+      "value": "#F7F7F8"
     },
     {
       "name": "jm_surface",
@@ -14,47 +14,59 @@
     },
     {
       "name": "jm_text",
-      "value": "#17202A"
+      "value": "#18181B"
     },
     {
       "name": "jm_muted",
-      "value": "#6B7280"
+      "value": "#8E8E93"
     },
     {
       "name": "jm_primary",
-      "value": "#47685B"
+      "value": "#18181B"
     },
     {
       "name": "jm_primary_soft",
-      "value": "#EAF1ED"
+      "value": "#F0F0F2"
+    },
+    {
+      "name": "jm_on_primary",
+      "value": "#FFFFFF"
     },
     {
       "name": "jm_accent",
-      "value": "#D66545"
+      "value": "#FF5A2C"
+    },
+    {
+      "name": "jm_accent_soft",
+      "value": "#FFEDE6"
     },
     {
       "name": "jm_border",
-      "value": "#E5E7EB"
+      "value": "#ECECEE"
     },
     {
       "name": "jm_selected_bg",
-      "value": "#F0F4F1"
+      "value": "#F0F0F2"
     },
     {
       "name": "jm_tab_muted",
-      "value": "#7A818A"
+      "value": "#9A9AA0"
     },
     {
       "name": "jm_surface_soft",
-      "value": "#F8FAF9"
+      "value": "#F1F1F3"
     },
     {
       "name": "jm_warm_soft",
-      "value": "#FFF4EF"
+      "value": "#F1F1F3"
     },
     {
       "name": "jm_divider",
-      "value": "#EEF0F2"
+      "value": "#EEEEEF"
+    },
+    {
+      "name": "jm_error",
+      "value": "#D92D20"
     }
   ]
 }

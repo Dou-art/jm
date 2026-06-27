@@ -1,9 +1,11 @@
-import http from '@ohos.net.http';
 import { image } from '@kit.ImageKit';
+import { taskpool, util } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { decodeRawInWorker, DecodeRawResult } from './ReaderDecodeTask';
 
 const DOMAIN = 0x0000;
 const TAG = 'JMApp';
+const DECODE_CACHE_CAPACITY = 16;
 
 export interface DecodedReaderImage {
   pixelMap: image.PixelMap;
@@ -11,135 +13,80 @@ export interface DecodedReaderImage {
   height: number;
 }
 
-interface DecodeCacheItem {
-  promise: Promise<DecodedReaderImage>;
-}
+// LRU 缓存解码结果，淘汰时释放 PixelMap 占用的内存，杜绝无界 Map 泄漏
+class DecodeLruCache extends util.LRUCache<string, DecodedReaderImage> {
+  constructor(capacity: number) {
+    super(capacity);
+  }
 
-const decodeCache: Map<string, DecodeCacheItem> = new Map<string, DecodeCacheItem>();
-
-async function downloadImage(url: string): Promise<ArrayBuffer> {
-  const request = http.createHttp();
-  try {
-    const response = await request.request(url, {
-      method: http.RequestMethod.GET,
-      expectDataType: http.HttpDataType.ARRAY_BUFFER,
-      connectTimeout: 30000,
-      readTimeout: 30000,
-      header: {
-        'User-Agent': 'Mozilla/5.0 HarmonyOS JMReader',
-        'Referer': url
-      }
-    });
-    const code = Number(response.responseCode);
-    if (code < 200 || code >= 300) {
-      throw new Error(`image network error: ${code}`);
+  afterRemoval(
+    isEvict: boolean,
+    key: string,
+    value: DecodedReaderImage,
+    newValue: DecodedReaderImage
+  ): void {
+    // 仅在容量淘汰（非 put 覆盖同 key）时释放，避免释放仍在用的新值
+    if (isEvict && newValue === undefined) {
+      value.pixelMap.release();
+      hilog.info(DOMAIN, TAG, 'decode cache evict release key=%{public}s', key);
     }
-    if (response.result instanceof ArrayBuffer) {
-      return response.result;
+  }
+}
+
+const decodeCache: DecodeLruCache = new DecodeLruCache(DECODE_CACHE_CAPACITY);
+const inflight: Map<string, Promise<DecodedReaderImage>> = new Map<string, Promise<DecodedReaderImage>>();
+
+export function clearDecodeCache(): void {
+  const keys = decodeCache.keys();
+  for (let index = 0; index < keys.length; index++) {
+    const item = decodeCache.get(keys[index]);
+    if (item !== undefined) {
+      item.pixelMap.release();
     }
-    throw new Error('image response is not ArrayBuffer');
-  } finally {
-    request.destroy();
   }
-}
-
-function copyRows(
-  source: Uint8Array,
-  target: Uint8Array,
-  width: number,
-  sourceY: number,
-  targetY: number,
-  height: number
-): void {
-  const stride = width * 4;
-  for (let row = 0; row < height; row++) {
-    const sourceOffset = (sourceY + row) * stride;
-    const targetOffset = (targetY + row) * stride;
-    target.set(source.subarray(sourceOffset, sourceOffset + stride), targetOffset);
-  }
-}
-
-function swapRedBlue(bytes: Uint8Array): void {
-  for (let index = 0; index < bytes.length; index += 4) {
-    const red = bytes[index];
-    bytes[index] = bytes[index + 2];
-    bytes[index + 2] = red;
-  }
+  decodeCache.clear();
+  hilog.info(DOMAIN, TAG, 'decode cache cleared count=%{public}d', keys.length);
 }
 
 async function decodeImage(url: string, seed: number): Promise<DecodedReaderImage> {
-  const buffer = await downloadImage(url);
-  const source = image.createImageSource(buffer);
-  let original: image.PixelMap | null = null;
-  try {
-    original = await source.createPixelMap({
-      desiredPixelFormat: image.PixelMapFormat.RGBA_8888,
-      editable: true
-    });
-    const info = await original.getImageInfo();
-    const width = info.size.width;
-    const height = info.size.height;
-    const sourceBuffer = new ArrayBuffer(width * height * 4);
-    await original.readPixelsToBuffer(sourceBuffer);
-
-    if (seed <= 1) {
-      return {
-        pixelMap: original,
-        width,
-        height
-      };
-    }
-
-    const sourceBytes = new Uint8Array(sourceBuffer);
-    const targetBuffer = new ArrayBuffer(width * height * 4);
-    const targetBytes = new Uint8Array(targetBuffer);
-    const baseHeight = Math.floor(height / seed);
-    const remainder = height % seed;
-
-    for (let index = 0; index < seed; index++) {
-      let sliceHeight = baseHeight;
-      let targetY = baseHeight * index;
-      const sourceY = height - baseHeight * (index + 1) - remainder;
-      if (index === 0) {
-        sliceHeight += remainder;
-      } else {
-        targetY += remainder;
-      }
-      copyRows(sourceBytes, targetBytes, width, sourceY, targetY, sliceHeight);
-    }
-    swapRedBlue(targetBytes);
-
-    const decoded = await image.createPixelMap(targetBuffer, {
-      size: {
-        width,
-        height
-      },
-      pixelFormat: image.PixelMapFormat.RGBA_8888,
-      editable: false
-    });
-    await original.release();
-    original = null;
-    return {
-      pixelMap: decoded,
-      width,
-      height
-    };
-  } finally {
-    await source.release();
-  }
+  // 下载 + 像素重组解扰在 TaskPool 子线程完成，返回可转移的 ArrayBuffer，主线程仅 createPixelMap，避免卡帧
+  hilog.info(DOMAIN, TAG, 'decode dispatch taskpool seed=%{public}d', seed);
+  const raw = await taskpool.execute(decodeRawInWorker, url, seed) as DecodeRawResult;
+  hilog.info(DOMAIN, TAG, 'decode worker done %{public}dx%{public}d', raw.width, raw.height);
+  const pixelMap = await image.createPixelMap(raw.buffer, {
+    size: {
+      width: raw.width,
+      height: raw.height
+    },
+    pixelFormat: image.PixelMapFormat.RGBA_8888,
+    editable: false
+  });
+  return {
+    pixelMap,
+    width: raw.width,
+    height: raw.height
+  };
 }
 
 export function getDecodedReaderImage(url: string, seed: number): Promise<DecodedReaderImage> {
   const key = `${seed}:${url}`;
   const cached = decodeCache.get(key);
   if (cached !== undefined) {
-    return cached.promise;
+    return Promise.resolve(cached);
   }
-  const promise = decodeImage(url, seed).catch((error: Error) => {
-    decodeCache.delete(key);
+  const pending = inflight.get(key);
+  if (pending !== undefined) {
+    return pending;
+  }
+  const promise = decodeImage(url, seed).then((result: DecodedReaderImage) => {
+    decodeCache.put(key, result);
+    inflight.delete(key);
+    return result;
+  }).catch((error: Error) => {
+    inflight.delete(key);
     hilog.error(DOMAIN, TAG, 'decode reader image failed %{public}s', error.message);
-    throw error;
+    throw error as Error;
   });
-  decodeCache.set(key, { promise });
+  inflight.set(key, promise);
   return promise;
 }

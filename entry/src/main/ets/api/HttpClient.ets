@@ -29,12 +29,17 @@ export class JmHttpClient {
   private tokenPromise: Promise<string>;
   private baseUrl: string;
   private timeoutMs: number;
+  private cookiePersister: (() => void) | null = null;
 
   constructor(options?: JmApiClientOptions) {
     this.baseUrl = normalizeBaseUrl(options?.baseUrl ?? DEFAULT_API_LIST[0]);
     this.timeoutMs = options?.timeoutMs ?? 30000;
     this.apiTs = nowApiTs();
     this.tokenPromise = createApiToken(this.apiTs);
+  }
+
+  setCookiePersister(persister: () => void): void {
+    this.cookiePersister = persister;
   }
 
   setBaseUrl(baseUrl: string): void {
@@ -89,6 +94,7 @@ export class JmHttpClient {
       const response = await request.request(url, options);
       if (response.cookies.length > 0) {
         this.cookieJar.saveFromSetCookie([response.cookies]);
+        this.cookiePersister?.();
       }
       const code = Number(response.responseCode);
       const data = typeof response.result === 'string' ? response.result : JSON.stringify(response.result);

@@ -1,6 +1,7 @@
 import { ApiResult, failure, success } from '../ApiResult';
 import { parseChapterImages } from '../DataDecode';
 import { JmHttpClient } from '../HttpClient';
+import { CacheStore, TTL_DETAIL, TTL_HOME } from '../CacheStore';
 import {
   CollectComicResponse,
   ComicDetailResponse,
@@ -16,15 +17,19 @@ import {
 
 export class ComicApi {
   private readonly http: JmHttpClient;
+  private readonly cache: CacheStore;
 
-  constructor(http: JmHttpClient) {
+  constructor(http: JmHttpClient, cache: CacheStore) {
     this.http = http;
+    this.cache = cache;
   }
 
   getComicDetail(id: number): Promise<ApiResult<ComicDetailResponse>> {
-    const query = new Map<string, string | number | boolean | undefined | null>();
-    query.set('id', id);
-    return this.http.getJson<ComicDetailResponse>('album', query);
+    return this.cache.getOrFetch<ComicDetailResponse>(`detail:${id}`, TTL_DETAIL, () => {
+      const query = new Map<string, string | number | boolean | undefined | null>();
+      query.set('id', id);
+      return this.http.getJson<ComicDetailResponse>('album', query);
+    });
   }
 
   likeComic(id: number): Promise<ApiResult<LikeComicResponse>> {
@@ -44,7 +49,9 @@ export class ComicApi {
   }
 
   getHomeSwiperComicList(): Promise<ApiResult<HomeSwiperComicListItemResponse[]>> {
-    return this.http.getJson<HomeSwiperComicListItemResponse[]>('promote');
+    return this.cache.getOrFetch<HomeSwiperComicListItemResponse[]>('home', TTL_HOME, () => {
+      return this.http.getJson<HomeSwiperComicListItemResponse[]>('promote');
+    });
   }
 
   async getComicPicList(id: number, shunt: string): Promise<ApiResult<ComicPicListResponse>> {
